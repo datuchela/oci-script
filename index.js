@@ -94,12 +94,12 @@ async function createComputeInstance() {
 
 async function waitWithTimer(seconds) {
 	return new Promise((resolve) => {
-		let remaining = seconds;
+		let timer = 0;
 
 		const interval = setInterval(() => {
-			if (remaining > 0) {
-				process.stdout.write(`Waiting for ${remaining}/${seconds} seconds...\r`);
-				remaining -= 1;
+			if (timer <= seconds) {
+				process.stdout.write(`Waiting for ${timer}/${seconds} seconds...\r`);
+				timer += 1;
 			} else {
 				clearInterval(interval);
 				process.stdout.write('\n'); // Move to the next line after the timer ends
