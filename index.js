@@ -90,10 +90,11 @@ async function createComputeInstance(computeClient, availabilityDomains) {
 					await waitWithTimer(LONG_WAIT_SECONDS);
 					return; // Exit the function to prevent scheduling another immediate call
 				} else if (err.message === "Out of host capacity.") {
-					console.log("[INFO] Out of host capacity.");
+					console.log(`[INFO] ${ad.name}: Out of host capacity.`);
 					await waitWithTimer(AD_REQ_INTERVAL_SECONDS);
 				} else {
-					console.error(`Failed to create instance in ${ad.name}:`, err);
+					console.error(`Failed to create instance in ${ad.name}`);
+					console.error(err);
 				}
 			}
 		}
