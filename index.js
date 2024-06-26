@@ -3,17 +3,69 @@ const identity = require("oci-identity");
 const common = require("oci-common");
 require("dotenv").config();
 
-const RETRY_WAIT_SECONDS = 64;
-const LONG_WAIT_SECONDS = 8 * 60;
+const RETRY_WAIT_SECONDS = process.env.RETRY_WAIT_SECONDS ?? 64;
+const LONG_WAIT_MINUTES = process.env.LONG_WAIT_MINUTES ?? 10;
+const LONG_WAIT_SECONDS = LONG_WAIT_MINUTES * 60;
 
-const DISPLAY_NAME = process.env.DISPLAY_NAME;
-const OCI_SHAPE = process.env.OCI_SHAPE;
-const OCI_OCPUS = process.env.OCI_OCPUS;
-const OCI_MEMORY_IN_GBS = process.env.OCI_MEMORY_IN_GBS;
+const DISPLAY_NAME = process.env.DISPLAY_NAME ?? "myOciInstance";
+const OCI_SHAPE = process.env.OCI_SHAPE ?? "VM.Standard.A1.Flex";
+const OCI_OCPUS = process.env.OCI_OCPUS ?? 4;
+const OCI_MEMORY_IN_GBS = process.env.OCI_MEMORY_IN_GBS ?? 24;
 const OCI_IMAGE_ID = process.env.OCI_IMAGE_ID;
 const OCI_COMPARTMENT_ID = process.env.OCI_COMPARTMENT_ID;
 const OCI_SUBNET_ID = process.env.OCI_SUBNET_ID;
 const SSH_KEY_PUB = process.env.SSH_KEY_PUB;
+
+const requiredVars = {
+	OCI_IMAGE_ID,
+	OCI_COMPARTMENT_ID,
+	OCI_SUBNET_ID,
+	SSH_KEY_PUB,
+};
+
+// Script execution ---------------------
+console.log("Starting script");
+checkEnvVariables(requiredVars);
+runCreateComputeInstanceInterval(RETRY_WAIT_SECONDS);
+// --------------------------------------
+
+function checkEnvVariables(requiredVars) {
+	for (const [key, value] of Object.entries(requiredVars)) {
+		if (value === null || value === undefined) {
+			throw new Error(`${key} is not set in environmental variables`);
+		}
+	}
+}
+
+async function runCreateComputeInstanceInterval(interval) {
+	for (; ;) {
+		let date = new Date(Date.now());
+		console.log(date.toLocaleString());
+		try {
+			await createComputeInstance();
+			await waitWithTimer(interval);
+		} catch (err) {
+			console.error("Unhandled error:", err);
+		}
+	}
+}
+
+async function waitWithTimer(seconds) {
+	return new Promise((resolve) => {
+		let timer = 0;
+
+		const interval = setInterval(() => {
+			if (timer <= seconds) {
+				process.stdout.write(`Waiting for ${timer}/${seconds} seconds...\r`);
+				timer += 1;
+			} else {
+				clearInterval(interval);
+				process.stdout.write('\n'); // Move to the next line after the timer ends
+				resolve();
+			}
+		}, 1000);
+	});
+}
 
 async function createComputeInstance() {
 	// Load the configuration from the default location (~/.oci/config)
@@ -91,36 +143,3 @@ async function createComputeInstance() {
 		console.error("Error fetching availability domains:", err);
 	}
 }
-
-async function waitWithTimer(seconds) {
-	return new Promise((resolve) => {
-		let timer = 0;
-
-		const interval = setInterval(() => {
-			if (timer <= seconds) {
-				process.stdout.write(`Waiting for ${timer}/${seconds} seconds...\r`);
-				timer += 1;
-			} else {
-				clearInterval(interval);
-				process.stdout.write('\n'); // Move to the next line after the timer ends
-				resolve();
-			}
-		}, 1000);
-	});
-}
-
-async function runCreateComputeInstanceEveryMinute() {
-	for (; ;) {
-		let date = new Date(Date.now());
-		console.log(date.toLocaleString());
-		try {
-			await createComputeInstance();
-			await waitWithTimer(RETRY_WAIT_SECONDS);
-		} catch (err) {
-			console.error("Unhandled error:", err);
-		}
-	}
-}
-
-console.log("Starting script");
-runCreateComputeInstanceEveryMinute(); // Initial call to start the process immediately
