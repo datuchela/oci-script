@@ -3,6 +3,7 @@ const identity = require("oci-identity");
 const common = require("oci-common");
 require("dotenv").config();
 
+const AD_REQ_INTERVAL_SECONDS = process.env.AD_REQ_INTERVAL_SECONDS ?? 5;
 const RETRY_WAIT_SECONDS = process.env.RETRY_WAIT_SECONDS ?? 64;
 const LONG_WAIT_MINUTES = process.env.LONG_WAIT_MINUTES ?? 10;
 const LONG_WAIT_SECONDS = LONG_WAIT_MINUTES * 60;
@@ -23,30 +24,81 @@ const requiredVars = {
 	SSH_KEY_PUB,
 };
 
-// Script execution ---------------------
-console.log("Starting script");
-checkEnvVariables(requiredVars);
-runCreateComputeInstanceInterval(RETRY_WAIT_SECONDS);
-// --------------------------------------
-
-function checkEnvVariables(requiredVars) {
-	for (const [key, value] of Object.entries(requiredVars)) {
-		if (value === null || value === undefined) {
-			throw new Error(`${key} is not set in environmental variables`);
-		}
-	}
+const optionalVars = {
+	AD_REQ_INTERVAL_SECONDS: process.env.AD_REQ_INTERVAL_SECONDS,
+	RETRY_WAIT_SECONDS: process.env.RETRY_WAIT_SECONDS,
+	LONG_WAIT_MINUTES: process.env.LONG_WAIT_MINUTES,
+	DISPLAY_NAME: process.env.DISPLAY_NAME,
+	OCI_SHAPE: process.env.OCI_SHAPE,
+	OCI_OCPUS: process.env.OCI_OCPUS,
+	OCI_MEMORY_IN_GBS: process.env.OCI_MEMORY_IN_GBS,
 }
 
-async function runCreateComputeInstanceInterval(interval) {
-	for (; ;) {
-		let date = new Date(Date.now());
-		console.log(date.toLocaleString());
-		try {
-			await createComputeInstance();
-			await waitWithTimer(interval);
-		} catch (err) {
-			console.error("Unhandled error:", err);
+function checkEnvVariables(requiredVars, optional) {
+	console.log(`[INFO] Checking ${optional ? "optional" : "required"} environment variables...`);
+	for (const [key, value] of Object.entries(requiredVars)) {
+		console.log(`${key}=${value}`);
+		if (value === null || value === undefined) {
+			if (!optional) {
+				throw new Error(`${key} is not set in environment variables`);
+			}
+			console.warn(`[WARN] ${key} is not set in environment variables, default value will be used`);
 		}
+	}
+	console.log("[INFO] Done");
+}
+
+async function createComputeInstance(computeClient, availabilityDomains) {
+	try {
+
+		const launchInstanceDetailsTemplate = {
+			compartmentId: OCI_COMPARTMENT_ID,
+			shape: OCI_SHAPE,
+			shapeConfig: {
+				ocpus: OCI_OCPUS,
+				memoryInGBs: OCI_MEMORY_IN_GBS,
+			},
+			displayName: DISPLAY_NAME,
+			sourceDetails: {
+				sourceType: "image",
+				imageId: OCI_IMAGE_ID,
+			},
+			createVnicDetails: {
+				assignPublicIp: true,
+				subnetId: OCI_SUBNET_ID,
+			},
+			metadata: {
+				ssh_authorized_keys: SSH_KEY_PUB,
+			},
+		};
+
+		for (const ad of availabilityDomains) {
+			const launchInstanceDetails = {
+				...launchInstanceDetailsTemplate,
+				availabilityDomain: ad.name
+			};
+
+			try {
+				const launchInstanceResponse = await computeClient.launchInstance({
+					launchInstanceDetails: launchInstanceDetails,
+				});
+				console.log(`[SUCCESS] Instance created successfully in ${ad.name}:`, launchInstanceResponse.instance);
+				break;
+			} catch (err) {
+				if (err.serviceCode === "TooManyRequests") {
+					console.error(`[WARN] Too many requests. Waiting before retrying...`);
+					await waitWithTimer(LONG_WAIT_SECONDS);
+					return; // Exit the function to prevent scheduling another immediate call
+				} else if (err.message === "Out of host capacity.") {
+					console.log("[INFO] Out of host capacity.");
+					await waitWithTimer(AD_REQ_INTERVAL_SECONDS);
+				} else {
+					console.error(`Failed to create instance in ${ad.name}:`, err);
+				}
+			}
+		}
+	} catch (err) {
+		console.error("Error fetching availability domains:", err);
 	}
 }
 
@@ -67,79 +119,52 @@ async function waitWithTimer(seconds) {
 	});
 }
 
-async function createComputeInstance() {
-	// Load the configuration from the default location (~/.oci/config)
-	const provider = new common.ConfigFileAuthenticationDetailsProvider();
+async function runCreateComputeInstanceInterval(createComputeInstanceProps, interval) {
+	for (; ;) {
+		let date = new Date(Date.now());
+		console.log(`[INFO] ${date.toLocaleString()}`);
+		try {
+			await createComputeInstance(...createComputeInstanceProps);
+			console.log("Retrying after the interval");
+			await waitWithTimer(interval);
+		} catch (err) {
+			console.error("[ERROR] Unhandled error:", err);
+		}
+	}
+}
 
-	const identityClient = new identity.IdentityClient({
-		authenticationDetailsProvider: provider
-	});
-
-	const computeClient = new core.ComputeClient({
-		authenticationDetailsProvider: provider
-	});
-
-	// Replace with your compartment OCID
-	const compartmentId = OCI_COMPARTMENT_ID;
-
+// Script start (main)
+(async () => {
 	try {
-		// Get the list of availability domains
+		console.log("Starting script");
+		checkEnvVariables(requiredVars);
+		checkEnvVariables(optionalVars, true);
+
+		// Load the configuration from the default location (~/.oci/config)
+		const provider = new common.ConfigFileAuthenticationDetailsProvider();
+
+		const identityClient = new identity.IdentityClient({
+			authenticationDetailsProvider: provider
+		});
+
+		const computeClient = new core.ComputeClient({
+			authenticationDetailsProvider: provider
+		});
+
 		const listAvailabilityDomainsResponse = await identityClient.listAvailabilityDomains({
-			compartmentId: compartmentId
+			compartmentId: OCI_COMPARTMENT_ID
 		});
 		const availabilityDomains = listAvailabilityDomainsResponse.items;
 
-		// Set up the necessary parameters for the instance creation
-		const createVnicDetails = {
-			assignPublicIp: true,
-			subnetId: OCI_SUBNET_ID,
-		};
+		const createComputeInstanceParams = [
+			computeClient,
+			availabilityDomains,
+		];
 
-		const launchInstanceDetailsTemplate = {
-			compartmentId: compartmentId,
-			shape: OCI_SHAPE,
-			shapeConfig: {
-				ocpus: OCI_OCPUS,
-				memoryInGBs: OCI_MEMORY_IN_GBS,
-			},
-			displayName: DISPLAY_NAME,
-			sourceDetails: {
-				sourceType: "image",
-				imageId: OCI_IMAGE_ID,
-			},
-			createVnicDetails: createVnicDetails,
-			metadata: {
-				ssh_authorized_keys: SSH_KEY_PUB,
-			}
-		};
-
-		for (const ad of availabilityDomains) {
-			const launchInstanceDetails = {
-				...launchInstanceDetailsTemplate,
-				availabilityDomain: ad.name
-			};
-
-			try {
-				const launchInstanceResponse = await computeClient.launchInstance({
-					launchInstanceDetails: launchInstanceDetails
-				});
-
-				console.log(`Instance created successfully in ${ad.name}:`, launchInstanceResponse.instance);
-				// If you only want to create one instance, break the loop after successful creation
-				break;
-			} catch (err) {
-				if (err.serviceCode === "TooManyRequests") {
-					console.error(`Too many requests. Waiting before retrying...`);
-					await waitWithTimer(LONG_WAIT_SECONDS);
-					return; // Exit the function to prevent scheduling another immediate call
-				} else if (err.message === "Out of host capacity.") {
-					console.log(err.message);
-				} else {
-					console.error(`Failed to create instance in ${ad.name}:`, err);
-				}
-			}
-		}
+		console.log(`Running runCreateComputeInstanceInterval with ${RETRY_WAIT_SECONDS}s interval`);
+		runCreateComputeInstanceInterval(createComputeInstanceParams, RETRY_WAIT_SECONDS);
 	} catch (err) {
-		console.error("Error fetching availability domains:", err);
+		throw new Error(err);
 	}
-}
+})();
+
