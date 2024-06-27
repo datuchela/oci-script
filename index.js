@@ -4,11 +4,13 @@ const common = require("oci-common");
 const chalk = require("chalk");
 require("dotenv").config();
 
+const FETCH_RETRY_ATTEMPTS = process.env.FETCH_RETRY_ATTEMPTS ?? 2;
+const FETCH_RETRY_WAIT_SECONDS = process.env.FETCH_RETRY_WAIT_SECONDS ?? 15;
 const AD_REQ_INTERVAL_SECONDS = process.env.AD_REQ_INTERVAL_SECONDS ?? 5;
-const RETRY_WAIT_SECONDS = process.env.RETRY_WAIT_SECONDS ?? 64;
 const INITIAL_BACKOFF_DELAY_SECONDS =
   process.env.INITIAL_BACKOFF_DELAY_SECONDS ?? 15;
 const MAX_BACKOFF_ATTEMPTS = process.env.MAX_BACKOFF_ATTEMPTS ?? 5;
+const RETRY_WAIT_SECONDS = process.env.RETRY_WAIT_SECONDS ?? 64;
 
 const DISPLAY_NAME = process.env.DISPLAY_NAME ?? "myOciInstance";
 const OCI_SHAPE = process.env.OCI_SHAPE ?? "VM.Standard.A1.Flex";
@@ -28,10 +30,13 @@ const requiredVars = {
 };
 
 const optionalVars = {
+  FETCH_RETRY_ATTEMPTS: process.env.FETCH_RETRY_ATTEMPTS,
+  FETCH_RETRY_WAIT_SECONDS: process.env.FETCH_RETRY_WAIT_SECONDS,
   AD_REQ_INTERVAL_SECONDS: process.env.AD_REQ_INTERVAL_SECONDS,
-  RETRY_WAIT_SECONDS: process.env.RETRY_WAIT_SECONDS,
-  LONG_WAIT_MINUTES: process.env.LONG_WAIT_MINUTES,
   INITIAL_BACKOFF_DELAY_SECONDS: process.env.INITIAL_BACKOFF_DELAY_SECONDS,
+  MAX_BACKOFF_ATTEMPTS: process.env.MAX_BACKOFF_ATTEMPTS,
+  RETRY_WAIT_SECONDS: process.env.RETRY_WAIT_SECONDS,
+
   DISPLAY_NAME: process.env.DISPLAY_NAME,
   OCI_SHAPE: process.env.OCI_SHAPE,
   OCI_OCPUS: process.env.OCI_OCPUS,
@@ -100,7 +105,7 @@ async function createComputeInstance(ad) {
       return "OutOfHostCapacity";
     } else if (err.message === "fetch failed") {
       console.log(
-        `${chalk.bgYellowBright.black("[FETCH ERROR]")} ${dateString} - ${chalk.red(ad.name)}: Fetch Failed`,
+        `${chalk.bgYellowBright.black("[FETCH]")} ${dateString} - ${chalk.red(ad.name)}: Fetch Failed`,
       );
       return "FetchFailed";
     } else {
@@ -150,7 +155,13 @@ async function handleDomain(ad, backOffDelay, backOffMaxAttempts) {
         await waitWithTimer(backoffTime, () => {}); // Do not log timer
         break;
       case "FetchFailed":
-        return;
+        if (i > FETCH_RETRY_ATTEMPTS) return;
+        console.log(
+          `Waiting for ${chalk.blue(FETCH_RETRY_WAIT_SECONDS)} seconds before retrying in ${ad.name}`,
+        );
+        console.log(`Number of retries ${i}/${FETCH_RETRY_ATTEMPTS}`);
+        await waitWithTimer(FETCH_RETRY_WAIT_SECONDS, () => {});
+        break;
       case "OutOfHostCapacity":
         return;
       default:
