@@ -137,26 +137,20 @@ async function waitWithTimer(seconds, logFn) {
 async function handleDomain(ad, backOffDelay, backOffMaxAttempts) {
   for (let i = 0; i < backOffMaxAttempts; i++) {
     const result = await createComputeInstance(ad);
-    let backoffTime;
 
     switch (result) {
       case "Success":
         console.log("breaking out of loop...");
         return; // Instance created successfully, exit loop
       case "TooManyRequests":
-        backoffTime = backOffDelay * Math.pow(2, i);
+        const backoffTime = backOffDelay * Math.pow(2, i);
         console.log(
           `Waiting for ${backoffTime} seconds before retrying in ${ad.name}`,
         );
         await waitWithTimer(backoffTime, () => {}); // Do not log timer
         break;
       case "FetchFailed":
-        backoffTime = backOffDelay * Math.pow(2, i);
-        console.log(
-          `Waiting for ${backoffTime} seconds before retrying in ${ad.name}`,
-        );
-        await waitWithTimer(backoffTime, () => {}); // Do not log timer
-        break;
+        return;
       case "OutOfHostCapacity":
         return;
       default:
