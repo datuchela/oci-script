@@ -128,8 +128,8 @@ async function waitWithTimer(seconds, logFn) {
   });
 }
 
-async function handleDomain(ad, delay, maxAttempts) {
-  for (let i = 0; i < maxAttempts; i++) {
+async function handleDomain(ad, backOffDelay, backOffMaxAttempts) {
+  for (let i = 0; i < backOffMaxAttempts; i++) {
     const result = await createComputeInstance(ad);
 
     switch (result) {
@@ -137,7 +137,7 @@ async function handleDomain(ad, delay, maxAttempts) {
         console.log("breaking out of loop...");
         return; // Instance created successfully, exit loop
       case "TooManyRequests":
-        const backoffTime = delay * Math.pow(2, i); // Exponential backoff
+        const backoffTime = backOffDelay * Math.pow(2, i); // Exponential backoff
         console.log(
           `Waiting for ${backoffTime} seconds before retrying in ${ad.name}`,
         );
