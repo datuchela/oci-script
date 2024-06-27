@@ -141,7 +141,7 @@ async function handleDomain(ad, delay, maxAttempts) {
         console.log(
           `Waiting for ${backoffTime} seconds before retrying in ${ad.name}`,
         );
-        await waitWithTimer(backoffTime);
+        await waitWithTimer(backoffTime, () => {}); // Do not log timer
         break;
       case "OutOfHostCapacity":
         return;
@@ -150,6 +150,7 @@ async function handleDomain(ad, delay, maxAttempts) {
     }
   }
 }
+
 async function handleDomainsSequental(availabilityDomains) {
   for (const [_, ad] of availabilityDomains.entries()) {
     handleDomain(ad, INITIAL_BACKOFF_DELAY_SECONDS, MAX_BACKOFF_ATTEMPTS);
