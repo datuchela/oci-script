@@ -1,6 +1,7 @@
 const core = require("oci-core");
 const identity = require("oci-identity");
 const common = require("oci-common");
+const chalk = require("chalk");
 require("dotenv").config();
 
 const AD_REQ_INTERVAL_SECONDS = process.env.AD_REQ_INTERVAL_SECONDS ?? 5;
@@ -93,8 +94,15 @@ async function createComputeInstance(ad) {
       );
       return "TooManyRequests";
     } else if (err.message === "Out of host capacity.") {
-      console.log(`[INFO] ${dateString} - ${ad.name}: Out of host capacity.`);
+      console.log(
+        `${chalk.bgGreenBright.black("[INFO]")} ${dateString} - ${chalk.blue(ad.name)}: Out of host capacity.`,
+      );
       return "OutOfHostCapacity";
+    } else if (err.message === "fetch failed") {
+      console.log(
+        `${chalk.bgYellowBright.black("[ERROR]")} ${dateString} - ${chalk.blue(ad.name)}: Fetch Failed`,
+      );
+      return "FetchFailed";
     } else {
       console.error(
         `[ERROR] ${dateString} - Failed to create instance in ${ad.name}:`,
@@ -129,13 +137,21 @@ async function waitWithTimer(seconds, logFn) {
 async function handleDomain(ad, backOffDelay, backOffMaxAttempts) {
   for (let i = 0; i < backOffMaxAttempts; i++) {
     const result = await createComputeInstance(ad);
+    let backoffTime;
 
     switch (result) {
       case "Success":
         console.log("breaking out of loop...");
         return; // Instance created successfully, exit loop
       case "TooManyRequests":
-        const backoffTime = backOffDelay * Math.pow(2, i); // Exponential backoff
+        backoffTime = backOffDelay * Math.pow(2, i);
+        console.log(
+          `Waiting for ${backoffTime} seconds before retrying in ${ad.name}`,
+        );
+        await waitWithTimer(backoffTime, () => {}); // Do not log timer
+        break;
+      case "FetchFailed":
+        backoffTime = backOffDelay * Math.pow(2, i);
         console.log(
           `Waiting for ${backoffTime} seconds before retrying in ${ad.name}`,
         );
@@ -151,7 +167,7 @@ async function handleDomain(ad, backOffDelay, backOffMaxAttempts) {
 
 async function handleDomainsSequental(availabilityDomains) {
   for (const [_, ad] of availabilityDomains.entries()) {
-    console.log(`Sending request to ${ad.name}`);
+    console.log(`Sending request to ${chalk.blue(ad.name)}`);
     handleDomain(ad, INITIAL_BACKOFF_DELAY_SECONDS, MAX_BACKOFF_ATTEMPTS);
     await waitWithTimer(AD_REQ_INTERVAL_SECONDS);
   }
