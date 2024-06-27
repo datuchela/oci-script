@@ -100,7 +100,7 @@ async function createComputeInstance(ad) {
       return "OutOfHostCapacity";
     } else if (err.message === "fetch failed") {
       console.log(
-        `${chalk.bgYellowBright.black("[ERROR]")} ${dateString} - ${chalk.blue(ad.name)}: Fetch Failed`,
+        `${chalk.bgYellowBright.black("[FETCH ERROR]")} ${dateString} - ${chalk.red(ad.name)}: Fetch Failed`,
       );
       return "FetchFailed";
     } else {
