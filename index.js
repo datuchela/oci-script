@@ -3,8 +3,6 @@ const identity = require("oci-identity");
 const common = require("oci-common");
 require("dotenv").config();
 
-// const LONG_WAIT_MINUTES = process.env.LONG_WAIT_MINUTES ?? 10;
-// const LONG_WAIT_SECONDS = LONG_WAIT_MINUTES * 60;
 const AD_REQ_INTERVAL_SECONDS = process.env.AD_REQ_INTERVAL_SECONDS ?? 5;
 const RETRY_WAIT_SECONDS = process.env.RETRY_WAIT_SECONDS ?? 64;
 const INITIAL_BACKOFF_DELAY_SECONDS =
@@ -153,6 +151,7 @@ async function handleDomain(ad, backOffDelay, backOffMaxAttempts) {
 
 async function handleDomainsSequental(availabilityDomains) {
   for (const [_, ad] of availabilityDomains.entries()) {
+    console.log(`Sending request to ${ad.name}`);
     handleDomain(ad, INITIAL_BACKOFF_DELAY_SECONDS, MAX_BACKOFF_ATTEMPTS);
     await waitWithTimer(AD_REQ_INTERVAL_SECONDS);
   }
